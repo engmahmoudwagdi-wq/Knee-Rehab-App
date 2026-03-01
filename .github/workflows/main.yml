@@ -1,33 +1,136 @@
-name: Android Build
+package com.knee10.v3
 
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
+import android.app.*
+import android.content.*
+import android.media.RingtoneManager
+import android.os.*
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import java.util.*
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+class MainActivity : AppCompatActivity() {
 
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+    private lateinit var titleText: TextView
+    private lateinit var timerText: TextView
+    private lateinit var streakText: TextView
+    private lateinit var painInput: EditText
+    private lateinit var startButton: Button
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+    private var currentExercise = 0
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+    // تم التعديل لتشمل التمارين الآمنة على الغضروف وبمدد زمنية مناسبة (10 تكرارات * 10 ثواني تقريباً)
+    private val exercises = listOf(
+        Pair("1. الانقباض الثابت (Quad Sets)", 100000L), 
+        Pair("2. رفع الساق المستقيمة (SLR)", 150000L),
+        Pair("3. تمرين الكوبري (Glute Bridge)", 90000L),
+        Pair("4. المحارة (Clamshells) - يمين", 90000L),
+        Pair("5. المحارة (Clamshells) - يسار", 90000L)
+    )
 
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug
+    private var countDownTimer: CountDownTimer? = null
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v3
-      with:
-        name: knee-app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        titleText = findViewById(R.id.titleText)
+        timerText = findViewById(R.id.timerText)
+        streakText = findViewById(R.id.streakText)
+        painInput = findViewById(R.id.painInput)
+        startButton = findViewById(R.id.startButton)
+
+        startButton.setOnClickListener {
+            currentExercise = 0
+            startExercise()
+        }
+
+        updateStreak()
+        scheduleReminder()
+    }
+
+    private fun startExercise() {
+        if (currentExercise >= exercises.size) {
+            finishWorkout()
+            return
+        }
+
+        val (name, duration) = exercises[currentExercise]
+        titleText.text = name
+
+        countDownTimer?.cancel()
+        countDownTimer = object : CountDownTimer(duration, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                val seconds = millisUntilFinished / 1000
+                val minutes = seconds / 60
+                val remainingSeconds = seconds % 60
+                timerText.text = String.format("%02d:%02d", minutes, remainingSeconds)
+            }
+
+            override fun onFinish() {
+                playSound()
+                currentExercise++
+                startExercise()
+            }
+        }.start()
+    }
+
+    private fun finishWorkout() {
+        titleText.text = "✔ مبروك"
+        timerText.text = "تم إنهاء تمارين اليوم بنجاح"
+        saveCompletion()
+        updateStreak()
+    }
+
+    private fun playSound() {
+        val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val ringtone = RingtoneManager.getRingtone(applicationContext, notification)
+        ringtone.play()
+    }
+
+    private fun saveCompletion() {
+        val prefs = getSharedPreferences("Knee10Prefs", MODE_PRIVATE)
+        val today = getTodayKey()
+
+        val painLevel = painInput.text.toString()
+        prefs.edit()
+            .putString("lastDay", today)
+            .putString("pain_$today", painLevel)
+            .apply()
+    }
+
+    private fun updateStreak() {
+        val prefs = getSharedPreferences("Knee10Prefs", MODE_PRIVATE)
+        val lastDay = prefs.getString("lastDay", "")
+        val today = getTodayKey()
+
+        if (lastDay == today) {
+            streakText.text = "✔ تمرين اليوم مكتمل"
+        } else {
+            streakText.text = "لم يتم التمرين اليوم"
+        }
+    }
+
+    private fun getTodayKey(): String {
+        val calendar = Calendar.getInstance()
+        return "${calendar.get(Calendar.YEAR)}-${calendar.get(Calendar.DAY_OF_YEAR)}"
+    }
+
+    private fun scheduleReminder() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, ReminderReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 16)
+            set(Calendar.MINUTE, 45)
+            set(Calendar.SECOND, 0)
+        }
+
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            AlarmManager.INTERVAL_DAY,
+            pendingIntent
+        )
+    }
+}
